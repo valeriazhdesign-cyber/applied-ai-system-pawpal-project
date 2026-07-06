@@ -65,19 +65,54 @@ Scheduled 6 task(s) using 85/120 available minutes.
 
 ## 🧪 Testing PawPal+
 
+### How to run
+
 ```bash
-# Run the full test suite:
-pytest
-
-# Run with coverage:
-pytest --cov
+python3 -m pytest tests/test_pawpal.py -v
 ```
 
-Sample test output:
+### What the tests cover
+
+| Area | Tests | What is verified |
+|---|---|---|
+| **Task lifecycle** | 3 | `mark_complete` sets the flag and is idempotent; adding tasks grows the pet's list |
+| **Sorting** | 3 | `sort_by_time` returns earliest-first; untimed tasks sort last; `sort_by_priority` returns HIGH → MEDIUM → LOW |
+| **Recurrence** | 5 | Completing a daily task queues a fresh pending copy; daily/weekly `is_due` boundaries including the exact-7-day edge case; non-recurring tasks return `None` and do not mutate the list |
+| **Conflict detection** | 4 | Overlapping windows produce a warning; back-to-back (shared endpoint) does not; `handle_conflicts` keeps the higher-priority task and drops the lower |
+
+### Test run output
 
 ```
-# Paste your pytest output here
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.0.3, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.14/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/valeria./Documents/codepath/AI201/week4/ai110-module2show-pawpal-starter
+plugins: anyio-4.13.0
+collecting ... collected 16 items
+
+tests/test_pawpal.py::test_mark_complete_sets_completed_true PASSED      [  6%]
+tests/test_pawpal.py::test_mark_complete_is_idempotent PASSED            [ 12%]
+tests/test_pawpal.py::test_add_task_increases_pet_task_count PASSED      [ 18%]
+tests/test_pawpal.py::test_sort_by_time_returns_chronological_order PASSED [ 25%]
+tests/test_pawpal.py::test_sort_by_time_tasks_without_preferred_time_sort_last PASSED [ 31%]
+tests/test_pawpal.py::test_sort_by_priority_highest_first PASSED         [ 37%]
+tests/test_pawpal.py::test_complete_daily_task_queues_next_occurrence PASSED [ 43%]
+tests/test_pawpal.py::test_daily_task_done_today_is_not_due PASSED       [ 50%]
+tests/test_pawpal.py::test_daily_task_done_yesterday_is_due PASSED       [ 56%]
+tests/test_pawpal.py::test_weekly_task_exactly_seven_days_ago_is_due PASSED [ 62%]
+tests/test_pawpal.py::test_weekly_task_done_three_days_ago_is_not_due PASSED [ 68%]
+tests/test_pawpal.py::test_non_recurring_task_complete_does_not_queue_next PASSED [ 75%]
+tests/test_pawpal.py::test_detect_conflicts_flags_overlapping_tasks PASSED [ 81%]
+tests/test_pawpal.py::test_detect_conflicts_no_warning_for_back_to_back_tasks PASSED [ 87%]
+tests/test_pawpal.py::test_detect_conflicts_no_warning_for_non_overlapping_tasks PASSED [ 93%]
+tests/test_pawpal.py::test_handle_conflicts_keeps_higher_priority_task PASSED [100%]
+
+============================== 16 passed in 0.02s ==============================
 ```
+
+### Confidence Level: ★★★★☆ (4 / 5)
+
+The core scheduling behaviors — priority sorting, recurrence windows, and conflict resolution — all pass, including the tricky boundary cases (exact 7-day weekly window, back-to-back tasks). The missing star reflects two gaps: `generate_plan` end-to-end is not tested as a full integration (pet-map wiring, budget overflow warning, multi-pet scheduling), and there is no test for a pet or owner with zero tasks to confirm the system handles empty states without crashing.
 
 ## 📐 Smarter Scheduling
 
