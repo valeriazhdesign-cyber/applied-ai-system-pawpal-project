@@ -44,14 +44,23 @@ pip install -r requirements.txt
 
 ## 🖥️ Sample Output
 
-Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
-
 ```
-# e.g.:
-# Daily plan for Biscuit (Golden Retriever):
-#   08:00 — Morning walk (30 min) [priority: high]
-#   09:00 — Feeding (10 min) [priority: high]
-#   ...
+$ python3 main.py
+=============================================
+         PAWPAL — TODAY'S SCHEDULE
+=============================================
+=== Care Plan for Valeria ===
+Total scheduled time: 85 min
+
+Scheduled:
+  [HIGH] Morning Walk (Rex) @ 07:00 (30 min)
+  [HIGH] Breakfast (Rex) @ 07:30 (10 min)
+  [HIGH] Wet Food (Luna) @ 07:40 (5 min)
+  [MEDIUM] Flea Medication (Rex) @ 07:45 (5 min)
+  [MEDIUM] Brush Coat (Luna) @ 07:50 (15 min)
+  [LOW] Feather Wand (Luna) @ 08:05 (20 min)
+
+Scheduled 6 task(s) using 85/120 available minutes.
 ```
 
 ## 🧪 Testing PawPal+
@@ -72,23 +81,46 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
+### Sorting
 
-| Feature | Method(s) | Notes |
-|---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Method | Behavior |
+|--------|----------|
+| `Scheduler.sort_by_priority()` | Sorts HIGH → MEDIUM → LOW using `Priority` enum values. Ties within the same priority are broken by `preferred_time` ascending so earlier tasks win conflicts. |
+| `Scheduler.sort_by_time()` | Sorts tasks chronologically by `preferred_time`. Converts `"HH:MM"` to total minutes for numeric comparison. Tasks without a `preferred_time` receive a sentinel of `9999` and sort to the end. |
+
+### Filtering
+
+| Method | Behavior |
+|--------|----------|
+| `Scheduler.filter_by_time()` | Drops tasks whose `preferred_time` falls before the scheduler's `start_time`. Tasks with no `preferred_time` always pass through. |
+| `Scheduler.filter_by_status()` | Returns tasks matching a given completion state. Defaults to pending-only (`completed=False`); pass `completed=True` to retrieve finished tasks. |
+| `Scheduler.filter_by_pet()` | Returns only tasks belonging to a named pet, using the `pet_map` (id(task) → Pet) built from `Owner.all_tasks()`. |
+| `Scheduler.filter_by_recurrence()` | Drops recurring tasks already completed within their cadence window. Delegates to `Task.is_due(today)` for each task. Non-recurring tasks always pass through. |
+
+### Conflict Detection
+
+| Method | Behavior |
+|--------|----------|
+| `Scheduler.detect_conflicts()` | Scans all task pairs whose `preferred_time` windows overlap (O(n²), each pair checked once). Returns a list of warning strings — does not modify the schedule or raise exceptions. |
+| `Scheduler.handle_conflicts()` | Resolves conflicts by keeping the higher-priority task and dropping lower-priority tasks that overlap an already-claimed slot. Tasks are processed in priority order so the first claim always wins. |
+
+### Recurring Task Logic
+
+| Method | Behavior |
+|--------|----------|
+| `Task.is_due(today)` | Returns `False` only when a recurring task was completed within its window: same day for `"daily"`, within 7 days for `"weekly"`. |
+| `Task.mark_complete(today)` | Sets `completed=True` and stamps `last_done` with today's date for recurring tasks. |
+| `Task.next_occurrence()` | Returns a fresh copy of the task with `completed=False` via `dataclasses.replace`. `last_done` is preserved so `is_due()` knows the window start. |
+| `Pet.complete_task(task, today)` | Marks a task complete and, if recurring, appends and returns the next occurrence to the pet's task list automatically. |
+| `Task.next_due_date()` | Returns the calendar date (`"YYYY-MM-DD"`) when the task is next due, computed as `last_done + timedelta(days=1)` for daily or `+ timedelta(days=7)` for weekly. |
+| `Task.days_until_next(today)` | Returns the number of days remaining until the task window reopens. Returns `0` if due today, `-1` if non-recurring. |
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
-
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+1. Run `python3 main.py` in the terminal from the project root.
+2. The script creates owner **Valeria** with 120 available minutes and two pets: **Rex** (Labrador) and **Luna** (Siamese).
+3. Each pet has three tasks with different priorities and preferred times (e.g. Morning Walk at 07:00, Breakfast at 07:30).
+4. The `Scheduler` sorts all tasks by priority (HIGH first), resolves time conflicts, and assigns sequential time slots starting at 07:00.
+5. The final plan prints as a single "Today's Schedule" section — each task row shows the pet name, priority, assigned time, and duration.
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
