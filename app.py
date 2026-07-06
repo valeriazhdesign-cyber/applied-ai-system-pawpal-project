@@ -65,20 +65,60 @@ if st.button("Add task"):
     st.session_state.tasks.append(task)
     st.success(f"Added: {task.name}")
 
+PRIORITY_ICON = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
+
 if st.session_state.tasks:
-    st.write("Current tasks:")
-    st.table(
-        [
-            {
-                "Task": t.name,
-                "Category": t.category.value,
-                "Duration (min)": t.duration,
-                "Priority": t.priority.name,
-                "Time": t.preferred_time or "—",
-            }
-            for t in st.session_state.tasks
-        ]
+    preview_scheduler = Scheduler(st.session_state.owner)
+
+    sort_mode = st.radio(
+        "Sort mode",
+        ["Priority", "Smart Priority (Weighted)"],
+        horizontal=True,
+        help=(
+            "**Priority** sorts by HIGH → MEDIUM → LOW. "
+            "**Smart Priority** also weighs category urgency "
+            "(meds > feeding > walk > grooming > enrichment), "
+            "whether a recurring task is overdue, and a small "
+            "efficiency nudge for shorter tasks."
+        ),
     )
+    use_weighted = sort_mode == "Smart Priority (Weighted)"
+
+    sorted_tasks = (
+        preview_scheduler.sort_by_weighted_priority(st.session_state.tasks)
+        if use_weighted
+        else preview_scheduler.sort_by_priority(st.session_state.tasks)
+    )
+
+    total_task_mins = sum(t.duration for t in sorted_tasks)
+    avail = st.session_state.owner.available_minutes
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Tasks", len(sorted_tasks))
+    m2.metric("Total time needed", f"{total_task_mins} min")
+    m3.metric("Time available", f"{avail} min", delta=f"{avail - total_task_mins} min")
+
+    label = "Current tasks (smart weighted order):" if use_weighted else "Current tasks (sorted by priority):"
+    st.write(label)
+
+    table_rows = []
+    for t in sorted_tasks:
+        row = {
+            "Task": t.name,
+            "Priority": f"{PRIORITY_ICON.get(t.priority.name, '')} {t.priority.name}",
+            "Category": t.category.value,
+            "Duration (min)": t.duration,
+            "Time": t.preferred_time or "—",
+        }
+        if use_weighted:
+            row["Urgency Score"] = f"{t.weighted_score():.1f}"
+        table_rows.append(row)
+    st.table(table_rows)
+
+    pet_map = {id(task): pet for pet, task in st.session_state.owner.all_tasks()}
+    conflicts = preview_scheduler.detect_conflicts(sorted_tasks, pet_map=pet_map)
+    for conflict in conflicts:
+        detail = conflict.strip().removeprefix("WARNING: ")
+        st.warning(f"Time conflict: {detail}\n\nTip: Edit the preferred time of one of these tasks above to resolve it.")
 else:
     st.info("No tasks yet. Add one above.")
 
@@ -89,6 +129,12 @@ st.subheader("Build Schedule")
 
 start_time = st.text_input("Start time (HH:MM)", value="08:00")
 
+use_weighted_schedule = st.checkbox(
+    "Use Smart Priority (Weighted) for schedule",
+    value=False,
+    help="When checked, the schedule uses the composite urgency score instead of raw priority.",
+)
+
 if st.button("Generate schedule"):
     owner = st.session_state.owner
     owner.available_minutes = int(available_minutes)
@@ -98,5 +144,53 @@ if st.button("Generate schedule"):
         st.warning("No tasks added yet. Add tasks above first.")
     else:
         scheduler = Scheduler(owner, start_time=start_time.strip() if start_time.strip() else None)
-        plan = scheduler.generate_plan(all_tasks)
-        st.text(plan.display())
+
+        pet_map = {id(task): pet for pet, task in owner.all_tasks()}
+        conflicts = scheduler.detect_conflicts(all_tasks, pet_map=pet_map)
+        for conflict in conflicts:
+            detail = conflict.strip().removeprefix("WARNING: ")
+            st.warning(f"Time conflict: {detail}\n\nTip: Edit the preferred time of one of these tasks to resolve it.")
+
+        plan = scheduler.generate_plan(all_tasks, use_weighted_sort=use_weighted_schedule)
+
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Scheduled", len(plan.scheduled_tasks))
+        s2.metric("Skipped", len(plan.skipped_tasks))
+        s3.metric("Minutes used", f"{plan.total_minutes} / {owner.available_minutes}")
+
+        st.subheader("Scheduled Tasks")
+        if plan.scheduled_tasks:
+            st.success(f"{len(plan.scheduled_tasks)} task(s) fit within your available time.")
+            st.table(
+                [
+                    {
+                        "Time": slot or "—",
+                        "Task": t.name,
+                        "Priority": f"{PRIORITY_ICON.get(t.priority.name, '')} {t.priority.name}",
+                        "Category": t.category.value,
+                        "Duration (min)": t.duration,
+                    }
+                    for t, slot, _ in plan.scheduled_tasks
+                ]
+            )
+        else:
+            st.info("No tasks could be scheduled.")
+
+        if plan.skipped_tasks:
+            st.subheader("Skipped Tasks")
+            st.error(f"{len(plan.skipped_tasks)} task(s) could not fit in your available time.")
+            st.table(
+                [
+                    {
+                        "Task": t.name,
+                        "Priority": f"{PRIORITY_ICON.get(t.priority.name, '')} {t.priority.name}",
+                        "Reason": reason,
+                    }
+                    for t, reason in plan.skipped_tasks
+                ]
+            )
+
+        if plan.skipped_tasks:
+            st.warning(plan.explanation)
+        else:
+            st.success(plan.explanation)

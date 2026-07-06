@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass, field, replace
 from datetime import date as _date, timedelta
 from enum import Enum
@@ -115,6 +116,30 @@ class Task:
         """Return the numeric value of this task's priority."""
         return self.priority.value
 
+    def weighted_score(self, today: Optional[str] = None) -> float:
+        """Return a composite urgency score for smarter sorting.
+
+        Score = priority (×10) + category urgency + overdue-recurring bonus + efficiency nudge.
+        Meds rank highest by category; shorter tasks get a fractional efficiency nudge so
+        tasks of equal priority that take less time are preferred (maximises tasks completed).
+        An overdue recurring task gains +8 — urgency equal to jumping one full priority band.
+        """
+        urgency = {
+            Category.MEDS: 5,
+            Category.FEEDING: 4,
+            Category.WALK: 3,
+            Category.GROOMING: 2,
+            Category.ENRICHMENT: 1,
+        }
+        today = today or str(_date.today())
+        score: float = self.priority_value() * 10
+        score += urgency.get(self.category, 1)
+        if self.recurring and self.last_done and self.days_until_next(today) == 0:
+            score += 8
+        # Fractional nudge: 0→1 favouring shorter tasks within the same band
+        score += max(0.0, (120 - self.duration) / 120)
+        return score
+
     def __str__(self) -> str:
         status = "DONE" if self.completed else "pending"
         parts = [
@@ -219,6 +244,67 @@ class Owner:
         """Return only (pet, task) pairs where the task is not yet completed."""
         return [(pet, task) for pet, task in self.all_tasks() if not task.completed]
 
+    def save_to_json(self, path: str) -> None:
+        """Persist this owner, their pets, and all tasks to a JSON file."""
+        data = {
+            "name": self.name,
+            "available_minutes": self.available_minutes,
+            "preferences": self.preferences,
+            "pets": [
+                {
+                    "name": pet.name,
+                    "species": pet.species,
+                    "breed": pet.breed,
+                    "tasks": [
+                        {
+                            "name": task.name,
+                            "category": task.category.value,
+                            "duration": task.duration,
+                            "priority": task.priority.value,
+                            "preferred_time": task.preferred_time,
+                            "recurring": task.recurring,
+                            "completed": task.completed,
+                            "last_done": task.last_done,
+                        }
+                        for task in pet.tasks
+                    ],
+                }
+                for pet in self.pets
+            ],
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load_from_json(cls, path: str) -> "Owner":
+        """Load an Owner (with pets and tasks) previously saved by save_to_json."""
+        with open(path) as f:
+            data = json.load(f)
+        owner = cls(
+            name=data["name"],
+            available_minutes=data["available_minutes"],
+            preferences=data.get("preferences"),
+        )
+        for pet_data in data.get("pets", []):
+            pet = Pet(
+                name=pet_data["name"],
+                species=pet_data["species"],
+                breed=pet_data.get("breed"),
+            )
+            for task_data in pet_data.get("tasks", []):
+                pet.add_task(Task(
+                    name=task_data["name"],
+                    category=Category(task_data["category"]),
+                    duration=task_data["duration"],
+                    priority=Priority(task_data["priority"]),
+                    preferred_time=task_data.get("preferred_time"),
+                    recurring=task_data.get("recurring"),
+                    completed=task_data.get("completed", False),
+                    last_done=task_data.get("last_done"),
+                ))
+            owner.add_pet(pet)
+        return owner
+
 
 class Plan:
     def __init__(self, owner: "Owner", pet: Optional["Pet"] = None) -> None:
@@ -275,12 +361,17 @@ class Scheduler:
         pet: Optional["Pet"] = None,
         pet_map: Optional[dict[int, "Pet"]] = None,
         today: Optional[str] = None,
+        use_weighted_sort: bool = False,
     ) -> Plan:
         """Build a time-ordered Plan by sorting, filtering, and assigning tasks."""
         today = today or str(_date.today())
         plan = Plan(self.owner, pet)
 
-        sorted_tasks = self.sort_by_priority(tasks)
+        sorted_tasks = (
+            self.sort_by_weighted_priority(tasks, today)
+            if use_weighted_sort
+            else self.sort_by_priority(tasks)
+        )
         filtered_tasks = self.filter_by_time(sorted_tasks)
         active_tasks = self.filter_by_status(filtered_tasks)
         due_tasks = self.filter_by_recurrence(active_tasks, today)
@@ -311,8 +402,27 @@ class Scheduler:
         return plan
 
     def sort_by_priority(self, tasks: list[Task]) -> list[Task]:
-        """Sort tasks highest-priority first; break ties by preferred_time."""
-        return sorted(tasks, key=lambda t: (-t.priority_value(), t.preferred_time or "99:99"))
+        """Sort tasks highest-priority first; break ties by preferred_time (numeric minutes)."""
+        def _time_key(t: Task) -> int:
+            if t.preferred_time:
+                h, m = map(int, t.preferred_time.split(":"))
+                return h * 60 + m
+            return 9999
+
+        return sorted(tasks, key=lambda t: (-t.priority_value(), _time_key(t)))
+
+    def sort_by_weighted_priority(
+        self, tasks: list[Task], today: Optional[str] = None
+    ) -> list[Task]:
+        """Sort tasks by composite urgency score (priority × 10 + category + overdue bonus).
+
+        Unlike sort_by_priority, this also accounts for clinical category urgency
+        (meds > feeding > walk > grooming > enrichment), whether a recurring task
+        is overdue, and a small efficiency nudge favouring shorter tasks within
+        the same band so the owner completes more tasks per session.
+        """
+        today = today or str(_date.today())
+        return sorted(tasks, key=lambda t: -t.weighted_score(today))
 
     def sort_by_time(self, tasks: list[Task]) -> list[Task]:
         """Sort tasks chronologically by preferred_time.
