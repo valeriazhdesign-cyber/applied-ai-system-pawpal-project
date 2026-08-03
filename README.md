@@ -16,7 +16,7 @@ PawPal+ combines a deterministic scheduling engine with a lightweight retrieval-
 
 ## Architecture Overview
 
-The system diagram below shows the high-level architecture of the project:
+The system diagram below shows the high-level architecture of the project. Its Mermaid source is also saved at [`diagrams/system_architecture.mmd`](diagrams/system_architecture.mmd):
 
 ```mermaid
 flowchart LR
@@ -31,6 +31,8 @@ flowchart LR
     I --> J[Testing and Validation]
     J --> K[Safe, Verified Output]
 ```
+
+A more detailed class-level UML diagram — covering `Task`, `Pet`, `Owner`, `Scheduler`, `CareGuidanceRetriever`, and `Plan` with their full method signatures and relationships — is saved at [`diagrams/uml_final_rag.mmd`](diagrams/uml_final_rag.mmd).
 
 At a class level, the key components are:
 

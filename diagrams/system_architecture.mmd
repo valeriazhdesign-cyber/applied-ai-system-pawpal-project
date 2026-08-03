@@ -1,0 +1,11 @@
+flowchart LR
+    A[Human Owner] --> B[Input: pet details, tasks, time budget, preferences]
+    B --> C[Scheduler Core]
+    C --> D[Conflict Detection + Priority Sorting]
+    D --> E[Care Guidance Retriever]
+    E --> F[Retrieved Pet-Care Context]
+    F --> G[Plan Builder + Explanation Generator]
+    G --> H[Final Schedule + AI Rationale]
+    H --> I[Human Review / UI Check]
+    I --> J[Testing and Validation]
+    J --> K[Safe, Verified Output]
