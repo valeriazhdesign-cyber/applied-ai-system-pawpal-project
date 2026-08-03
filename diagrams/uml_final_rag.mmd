@@ -1,0 +1,109 @@
+classDiagram
+    class Priority {
+        <<enumeration>>
+        LOW
+        MEDIUM
+        HIGH
+    }
+
+    class Category {
+        <<enumeration>>
+        WALK
+        FEEDING
+        MEDS
+        ENRICHMENT
+        GROOMING
+    }
+
+    class Task {
+        +str name
+        +Category category
+        +int duration
+        +Priority priority
+        +Optional~str~ preferred_time
+        +Optional~str~ recurring
+        +bool completed
+        +Optional~str~ last_done
+        +mark_complete(today) None
+        +next_occurrence() Task
+        +is_due(today) bool
+        +next_due_date() Optional~str~
+        +days_until_next(today) int
+        +priority_value() int
+        +weighted_score(today) float
+        +__str__() str
+    }
+
+    class Pet {
+        +str name
+        +str species
+        +Optional~str~ breed
+        +list~Task~ tasks
+        +add_task(task) None
+        +remove_task(task) None
+        +edit_task(task, changes) None
+        +complete_task(task, today) Optional~Task~
+        +list_tasks() list~Task~
+    }
+
+    class Owner {
+        +str name
+        +int available_minutes
+        +Optional~str~ preferences
+        +list~Pet~ pets
+        +add_pet(pet) None
+        +remove_pet(pet) None
+        +get_pet(name) Optional~Pet~
+        +all_tasks() list~tuple~
+        +tasks_for_pet(name) list~tuple~
+        +pending_tasks() list~tuple~
+    }
+
+    class CareGuidanceRetriever {
+        +retrieve(tasks, owner) list~str~
+        +build_rationale(base_explanation, tasks, owner) str
+    }
+
+    class Plan {
+        +Owner owner
+        +Optional~Pet~ pet
+        +list scheduled_tasks
+        +list skipped_tasks
+        +str explanation
+        +int total_minutes
+        +add_scheduled(task, time, pet) None
+        +add_skipped(task, reason) None
+        +display() str
+    }
+
+    class Scheduler {
+        +Owner owner
+        +int available_minutes
+        +Optional~str~ start_time
+        +CareGuidanceRetriever retriever
+        +generate_plan(tasks, pet, pet_map, today, use_weighted_sort) Plan
+        +sort_by_priority(tasks) list~Task~
+        +sort_by_weighted_priority(tasks, today) list~Task~
+        +sort_by_time(tasks) list~Task~
+        +filter_by_time(tasks) list~Task~
+        +filter_by_status(tasks, completed) list~Task~
+        +filter_by_pet(tasks, pet_name, pet_map) list~Task~
+        +filter_by_recurrence(tasks, today) list~Task~
+        +assign_times(tasks) list~tuple~
+        +detect_conflicts(tasks, pet_map) list~str~
+        +handle_conflicts(tasks) list~Task~
+    }
+
+    Task --> Priority : uses
+    Task --> Category : uses
+    Pet "1" *-- "0..*" Task : contains
+    Owner "1" *-- "0..*" Pet : owns
+    Plan --> Owner : references
+    Plan --> Pet : references (optional)
+    Plan --> Task : schedules / skips
+    Scheduler --> Owner : read current context
+    Scheduler --> CareGuidanceRetriever : uses retrieved guidance
+    Scheduler --> Plan : generates
+    Scheduler --> Task : sorts / filters / assigns
+    CareGuidanceRetriever --> Task : matches task categories
+    CareGuidanceRetriever --> Owner : considers preferences

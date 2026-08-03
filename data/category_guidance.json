@@ -1,0 +1,27 @@
+[
+  {
+    "category": "meds",
+    "keywords": ["meds", "medication", "medicine"],
+    "text": "Medication tasks should stay near the front of the day because missed doses carry the highest health risk."
+  },
+  {
+    "category": "feeding",
+    "keywords": ["feeding", "food", "meal"],
+    "text": "Feeding tasks cover basic nutrition needs and should be preserved before optional enrichment tasks."
+  },
+  {
+    "category": "walk",
+    "keywords": ["walk", "exercise", "morning"],
+    "text": "An early walk burns energy and reduces destructive behavior later in the day."
+  },
+  {
+    "category": "grooming",
+    "keywords": ["groom", "brush", "coat", "nail"],
+    "text": "Grooming tasks are lower urgency than health and feeding tasks and can shift later without harm."
+  },
+  {
+    "category": "enrichment",
+    "keywords": ["enrichment", "play", "toy"],
+    "text": "Enrichment tasks improve wellbeing but are the safest tasks to skip first when time runs short."
+  }
+]

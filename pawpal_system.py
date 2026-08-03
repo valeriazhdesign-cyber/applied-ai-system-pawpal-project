@@ -1,5 +1,7 @@
 from __future__ import annotations
 import json
+import os
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date as _date, timedelta
 from enum import Enum
@@ -349,11 +351,102 @@ class Plan:
         return "\n".join(lines)
 
 
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+_CATEGORY_GUIDANCE_PATH = os.path.join(_DATA_DIR, "category_guidance.json")
+_SPECIES_NOTES_PATH = os.path.join(_DATA_DIR, "species_notes.md")
+
+
+class CareGuidanceRetriever:
+    """Deterministic, local retrieval layer over two independent guidance documents.
+
+    This is intentionally not a semantic search engine or an external knowledge
+    base: it loads a JSON document of category-keyed guidance snippets and a
+    Markdown document of per-species care notes, scores both against the
+    tasks/pets/preferences in play, and merges the results into one ranked list
+    so Scheduler can fold them into the plan's explanation. Deterministic
+    scoring keeps runs reproducible for testing.
+    """
+
+    def __init__(
+        self,
+        category_guidance_path: str = _CATEGORY_GUIDANCE_PATH,
+        species_notes_path: str = _SPECIES_NOTES_PATH,
+    ) -> None:
+        self._category_guidance = self._load_category_guidance(category_guidance_path)
+        self._species_notes = self._load_species_notes(species_notes_path)
+
+    @staticmethod
+    def _load_category_guidance(path: str) -> list[dict]:
+        """Load category-keyed guidance snippets from a local JSON document."""
+        with open(path, encoding="utf-8") as f:
+            raw_entries = json.load(f)
+        return [
+            {
+                "category": Category(entry["category"]),
+                "keywords": tuple(entry["keywords"]),
+                "text": entry["text"],
+            }
+            for entry in raw_entries
+        ]
+
+    @staticmethod
+    def _load_species_notes(path: str) -> dict[str, str]:
+        """Parse a Markdown document of '## <species>' sections into {species: note text}."""
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        notes = {}
+        for block in content.split("\n## ")[1:]:
+            species_line, _, body = block.partition("\n")
+            notes[species_line.strip().lower()] = body.strip()
+        return notes
+
+    def retrieve(self, tasks: list["Task"], owner: "Owner", top_k: int = 3) -> list[str]:
+        """Score snippets from both guidance documents and return the top combined matches.
+
+        Category source: 2 points per task whose category matches a snippet, plus
+        1 point if any of its keywords appear in owner.preferences (case-insensitive).
+        Species source: 2 points per owner pet of the matching species. Snippets
+        scoring 0 are dropped; both sources compete on the same score scale so the
+        merged ranking reflects whichever source is more relevant right now.
+        """
+        prefs = (owner.preferences or "").lower()
+        scored = []
+
+        for snippet in self._category_guidance:
+            score = sum(2 for t in tasks if t.category == snippet["category"])
+            if any(kw in prefs for kw in snippet["keywords"]):
+                score += 1
+            if score > 0:
+                scored.append((score, snippet["text"]))
+
+        species_counts = Counter(pet.species.lower() for pet in owner.pets)
+        for species, count in species_counts.items():
+            note = self._species_notes.get(species)
+            if note:
+                scored.append((count * 2, note))
+
+        scored.sort(key=lambda pair: -pair[0])
+        return [text for _, text in scored[:top_k]]
+
+    def build_rationale(self, base_explanation: str, tasks: list["Task"], owner: "Owner") -> str:
+        """Append retrieved guidance sentences onto the scheduler's base explanation."""
+        guidance = self.retrieve(tasks, owner)
+        if not guidance:
+            return base_explanation
+        return base_explanation + "\n\nGuidance:\n" + "\n".join(f"- {g}" for g in guidance)
+
+
 class Scheduler:
-    def __init__(self, owner: "Owner", start_time: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        owner: "Owner",
+        start_time: Optional[str] = None,
+        retriever: Optional["CareGuidanceRetriever"] = None,
+    ) -> None:
         self.owner = owner
         self.available_minutes = owner.available_minutes
         self.start_time = start_time
+        self.retriever = retriever or CareGuidanceRetriever()
 
     def generate_plan(
         self,
@@ -395,10 +488,12 @@ class Scheduler:
                 plan.add_skipped(task, "insufficient time remaining")
 
         scheduled_count = len(plan.scheduled_tasks)
-        plan.explanation = (
+        base_explanation = (
             f"{warning}Scheduled {scheduled_count} task(s) using "
             f"{plan.total_minutes}/{self.available_minutes} available minutes."
         )
+        scheduled_only = [t for t, _, _ in plan.scheduled_tasks]
+        plan.explanation = self.retriever.build_rationale(base_explanation, scheduled_only, self.owner)
         return plan
 
     def sort_by_priority(self, tasks: list[Task]) -> list[Task]:

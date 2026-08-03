@@ -1,4 +1,4 @@
-from pawpal_system import Category, Owner, Pet, Priority, Scheduler, Task
+from pawpal_system import CareGuidanceRetriever, Category, Owner, Pet, Priority, Scheduler, Task
 
 
 def make_task(**kwargs):
@@ -196,3 +196,113 @@ def test_handle_conflicts_keeps_higher_priority_task():
     names = [t.name for t in result]
     assert "Walk" in names
     assert "Groom" not in names
+
+
+# ---------------------------------------------------------------------------
+# Care guidance retrieval
+# ---------------------------------------------------------------------------
+
+def test_retrieve_returns_guidance_for_matching_category():
+    """A meds task in the task list should surface the meds guidance snippet."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+    meds_task = make_task(name="Flea Medication", category=Category.MEDS)
+
+    guidance = retriever.retrieve([meds_task], owner)
+
+    assert any("Medication" in g for g in guidance)
+
+
+def test_retrieve_returns_no_guidance_for_empty_task_list():
+    """With no tasks and no matching preferences, retrieve should return nothing."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+
+    assert retriever.retrieve([], owner) == []
+
+
+def test_retrieve_respects_top_k_limit():
+    """retrieve should never return more than top_k snippets even with many matches."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+    tasks = [
+        make_task(name="Meds", category=Category.MEDS),
+        make_task(name="Feed", category=Category.FEEDING),
+        make_task(name="Walk", category=Category.WALK),
+    ]
+
+    guidance = retriever.retrieve(tasks, owner, top_k=2)
+
+    assert len(guidance) == 2
+
+
+def test_build_rationale_appends_guidance_to_base_explanation():
+    """build_rationale should append retrieved guidance beneath the base explanation."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+    meds_task = make_task(name="Flea Medication", category=Category.MEDS)
+
+    rationale = retriever.build_rationale("Scheduled 1 task(s).", [meds_task], owner)
+
+    assert rationale.startswith("Scheduled 1 task(s).")
+    assert "Medication" in rationale
+
+
+def test_build_rationale_returns_base_explanation_unchanged_when_no_guidance_matches():
+    """With no matching tasks or preferences, build_rationale should not alter the base text."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+
+    rationale = retriever.build_rationale("Scheduled 0 task(s).", [], owner)
+
+    assert rationale == "Scheduled 0 task(s)."
+
+
+def test_generate_plan_explanation_includes_retrieved_guidance():
+    """generate_plan should fold guidance for the scheduled tasks into plan.explanation."""
+    owner = make_owner()
+    scheduler = make_scheduler(owner)
+    meds_task = make_task(name="Flea Medication", category=Category.MEDS, preferred_time="08:00")
+
+    plan = scheduler.generate_plan([meds_task], today="2026-07-06")
+
+    assert "Medication" in plan.explanation
+
+
+def test_retrieve_includes_species_note_alongside_category_guidance():
+    """retrieve should merge the JSON category source with the Markdown species-notes source."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+    dog = Pet("Rex", species="dog")
+    owner.add_pet(dog)
+    walk_task = make_task(name="Morning Walk", category=Category.WALK)
+
+    guidance = retriever.retrieve([walk_task], owner, top_k=3)
+
+    assert any("early walk" in g for g in guidance)
+    assert any("Dogs are highly exercise-driven" in g for g in guidance)
+
+
+def test_retrieve_species_note_score_scales_with_pet_count():
+    """A species with more pets should outrank a species with fewer, all else equal."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+    owner.add_pet(Pet("Rex", species="dog"))
+    owner.add_pet(Pet("Fido", species="dog"))
+    owner.add_pet(Pet("Luna", species="cat"))
+
+    guidance = retriever.retrieve([], owner, top_k=1)
+
+    assert "Dogs are highly exercise-driven" in guidance[0]
+
+
+def test_retrieve_with_no_tasks_still_returns_species_note():
+    """With no tasks scheduled, retrieve should still surface a matching species note."""
+    retriever = CareGuidanceRetriever()
+    owner = make_owner()
+    owner.add_pet(Pet("Rex", species="dog"))
+
+    guidance = retriever.retrieve([], owner, top_k=5)
+
+    assert len(guidance) == 1
+    assert "Dogs are highly exercise-driven" in guidance[0]
